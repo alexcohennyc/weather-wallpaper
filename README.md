@@ -4,8 +4,6 @@ A macOS app that turns your desktop wallpaper into a live 3D globe with real-tim
 
 Built with MapboxGL, Swift, and WebKit. Entirely vibe-coded with Claude.
 
-![screenshot](https://github.com/user-attachments/assets/placeholder.png)
-
 ## Features
 
 - **3D Globe** — Mapbox Standard style with faded theme, rendered as your desktop wallpaper
