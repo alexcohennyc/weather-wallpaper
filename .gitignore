@@ -4,3 +4,12 @@ dist/
 *.xcuserdata
 xcuserdata/
 DerivedData/
+
+# Python / Windows build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.spec
+*.egg-info/
+venv/
+.env/

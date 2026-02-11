@@ -1,8 +1,8 @@
 # Weather Wallpaper
 
-A macOS app that turns your desktop wallpaper into a live 3D globe with real-time weather, flights, and more.
+A cross-platform app that turns your desktop wallpaper into a live 3D globe with real-time weather, flights, and more.
 
-Built with MapboxGL, Swift, and WebKit. Entirely vibe-coded with Claude.
+Built with MapboxGL and WebView. Entirely vibe-coded with Claude.
 
 ## Features
 
@@ -15,21 +15,54 @@ Built with MapboxGL, Swift, and WebKit. Entirely vibe-coded with Claude.
 - **Globe Spin** — smooth auto-rotation (~40s per revolution)
 - **Zoom Levels** — Globe, Country, City, and Street views
 - **Search Location** — geocode any city/place and fly there
-- **Menu Bar Controls** — toggle everything from the menu bar
+- **System Tray / Menu Bar Controls** — toggle everything from the tray or menu bar
 
 ## Requirements
 
-- macOS 13.0+
 - A free [Mapbox access token](https://account.mapbox.com/access-tokens/) (required)
 - A [Google Pollen API key](https://console.cloud.google.com/) (optional, for pollen data)
 
+### Windows
+
+- Windows 10 or later
+- Python 3.9+ (for running from source)
+- Microsoft Edge WebView2 Runtime (pre-installed on Windows 10 1803+ and Windows 11)
+
+### macOS
+
+- macOS 13.0+
+- Xcode Command Line Tools (for building from source)
+
 ## Install
 
-### From DMG
+### Windows
+
+#### Run from source
+
+```bash
+git clone https://github.com/alexcohennyc/weather-wallpaper.git
+cd weather-wallpaper
+pip install -r requirements.txt
+pythonw weather_wallpaper.py
+```
+
+Or simply double-click `run.bat` — it installs dependencies and launches the app.
+
+#### Build standalone .exe
+
+```bash
+build.bat
+```
+
+This creates `dist\WeatherWallpaper\WeatherWallpaper.exe` using PyInstaller.
+
+### macOS
+
+#### From DMG
 
 Download the latest DMG from [Releases](https://github.com/alexcohennyc/weather-wallpaper/releases), open it, and drag `WeatherWallpaper.app` to Applications.
 
-### Build from source
+#### Build from source
 
 ```bash
 git clone https://github.com/alexcohennyc/weather-wallpaper.git
@@ -41,15 +74,15 @@ Requires Xcode Command Line Tools (`xcode-select --install`).
 
 ## Setup
 
-1. Launch the app — a globe icon appears in your menu bar
-2. Click the icon → **Set Mapbox Token…** → paste your `pk.eyJ…` token
+1. Launch the app — a globe icon appears in your system tray (Windows) or menu bar (macOS)
+2. Right-click the icon → **Set Mapbox Token…** → paste your `pk.eyJ…` token
 3. The globe renders on your desktop
 
-## Menu Bar
+## System Tray / Menu Bar
 
 | Item | Description |
 |------|-------------|
-| Refresh Location | Re-detect current location via GPS |
+| Refresh Location | Re-detect current location (IP-based on Windows, GPS on macOS) |
 | Search Location… | Geocode a city/place and fly there |
 | Set Mapbox Token… | Enter your Mapbox public token |
 | Set Pollen API Key… | Enter your Google Pollen API key |
@@ -59,7 +92,17 @@ Requires Xcode Command Line Tools (`xcode-select --install`).
 | Show Pollen & Air Quality | Toggle bottom bar to allergy view |
 | Show Labels | Toggle map labels |
 | Spin Globe | Smooth auto-rotation |
-| Launch at Login | Start on boot |
+| Launch at Login | Start on boot (Registry on Windows, SMAppService on macOS) |
+
+## How It Works
+
+### Windows
+
+The app uses the **Progman/WorkerW** technique to embed a WebView2 window behind the desktop icons. A Python process manages the system tray icon and injects JavaScript commands into the webview to control the globe, weather overlays, and other features. Settings are stored in `%APPDATA%\WeatherWallpaper\settings.json`.
+
+### macOS
+
+The app creates a borderless `NSWindow` at the desktop window level using `CGWindowLevelForKey(.desktopWindow)` with a `WKWebView` rendering the globe. Settings are stored via `UserDefaults`.
 
 ## APIs Used
 
