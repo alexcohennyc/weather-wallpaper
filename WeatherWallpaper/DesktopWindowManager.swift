@@ -7,6 +7,7 @@ class DesktopWindowManager {
     private var pendingToken: String?
     private var pendingLocation: (lat: Double, lon: Double)?
     private var pendingPollenKey: String?
+    private var pendingUnitSystem: String?
 
     func setupWindows() {
         createWindowsForAllScreens()
@@ -25,6 +26,9 @@ class DesktopWindowManager {
         }
         if let key = UserDefaults.standard.string(forKey: "google-pollen-api-key"), !key.isEmpty {
             injectPollenApiKey(key)
+        }
+        if let unit = pendingUnitSystem ?? UserDefaults.standard.string(forKey: "unit-system") {
+            injectUnitSystem(unit)
         }
         if let loc = pendingLocation {
             injectLocation(lat: loc.lat, lon: loc.lon)
@@ -77,6 +81,16 @@ class DesktopWindowManager {
         if let key = UserDefaults.standard.string(forKey: "google-pollen-api-key"), !key.isEmpty {
             let script = WKUserScript(
                 source: "localStorage.setItem('google-pollen-api-key', \(quoteJS(key)));",
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            )
+            config.userContentController.addUserScript(script)
+        }
+
+        // Inject preferred unit system before page load
+        if let unit = pendingUnitSystem ?? UserDefaults.standard.string(forKey: "unit-system"), ["imperial", "metric"].contains(unit) {
+            let script = WKUserScript(
+                source: "localStorage.setItem('unit-system', \(quoteJS(unit)));",
                 injectionTime: .atDocumentStart,
                 forMainFrameOnly: true
             )
@@ -136,6 +150,16 @@ class DesktopWindowManager {
         let js = """
         localStorage.setItem('google-pollen-api-key', \(quoteJS(key)));
         if (window.reloadAllergy) window.reloadAllergy();
+        """
+        evaluateOnAll(js)
+    }
+
+    func injectUnitSystem(_ system: String) {
+        let normalized = system == "metric" ? "metric" : "imperial"
+        pendingUnitSystem = normalized
+        let js = """
+        localStorage.setItem('unit-system', \(quoteJS(normalized)));
+        if (window.setUnitSystem) window.setUnitSystem(\(quoteJS(normalized)));
         """
         evaluateOnAll(js)
     }
