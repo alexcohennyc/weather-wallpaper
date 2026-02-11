@@ -83,17 +83,14 @@
       attributionControl: false,
     });
 
-    map.once('style.load', function () {
+    var mapLoaded = false;
+
+    map.on('style.load', function () {
       map.setConfigProperty('basemap', 'theme', 'faded');
       map.setConfigProperty('basemap', 'showPlaceLabels', false);
       map.setConfigProperty('basemap', 'showRoadLabels', false);
       map.setConfigProperty('basemap', 'showPointOfInterestLabels', false);
       map.setConfigProperty('basemap', 'showTransitLabels', false);
-    });
-
-    var mapLoaded = false;
-
-    map.on('style.load', function () {
       map.setFog({
         'color': 'rgb(15, 15, 25)',
         'high-color': palette.accentRgb,
@@ -238,9 +235,8 @@
           'text-max-width': 8
         },
         paint: {
-          'text-color': 'rgba(255,255,255,0.7)',
-          'text-halo-color': 'rgba(0,0,0,0.5)',
-          'text-halo-width': 1
+          'text-color': 'rgba(0,0,0,0.6)',
+          'text-halo-width': 0
         }
       });
 
@@ -258,9 +254,8 @@
           'text-max-width': 8
         },
         paint: {
-          'text-color': 'rgba(255,255,255,0.5)',
-          'text-halo-color': 'rgba(0,0,0,0.5)',
-          'text-halo-width': 1
+          'text-color': 'rgba(0,0,0,0.5)',
+          'text-halo-width': 0
         }
       });
 
@@ -276,9 +271,8 @@
           'text-max-width': 8
         },
         paint: {
-          'text-color': 'rgba(255,255,255,0.6)',
-          'text-halo-color': 'rgba(0,0,0,0.5)',
-          'text-halo-width': 1
+          'text-color': 'rgba(0,0,0,0.55)',
+          'text-halo-width': 0
         }
       });
 
@@ -295,9 +289,8 @@
           'text-max-width': 8
         },
         paint: {
-          'text-color': 'rgba(255,255,255,0.5)',
-          'text-halo-color': 'rgba(0,0,0,0.5)',
-          'text-halo-width': 1
+          'text-color': 'rgba(0,0,0,0.45)',
+          'text-halo-width': 0
         }
       });
 

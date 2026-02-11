@@ -371,20 +371,7 @@ async function loadAllergyData() {
 window.reloadAllergy = loadAllergyData;
 
 function initLeafToggle() {
-  var btn = document.getElementById('leaf-btn');
-  var weatherView = document.getElementById('weather-view');
-  var allergyView = document.getElementById('allergy-view');
-
-  btn.addEventListener('click', function() {
-    showingAllergy = !showingAllergy;
-    btn.classList.toggle('active', showingAllergy);
-    weatherView.classList.toggle('bar-hidden', showingAllergy);
-    allergyView.classList.toggle('bar-hidden', !showingAllergy);
-
-    if (showingAllergy && allergyView.querySelector('.bar-loading')) {
-      loadAllergyData();
-    }
-  });
+  // Leaf button removed — pollen toggle now controlled from Swift menu bar
 }
 
 // --- Reverse geocode for city name ---
