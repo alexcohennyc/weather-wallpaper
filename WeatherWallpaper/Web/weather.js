@@ -1,6 +1,8 @@
 // --- Shared location ---
 var CACHE_KEY_PREFIX = 'weather-cache';
 var UNIT_SYSTEM_KEY = 'unit-system';
+var LAST_LOCATION_LAT_KEY = 'last-location-lat';
+var LAST_LOCATION_LON_KEY = 'last-location-lon';
 var POLLEN_KEY_STORAGE = 'google-pollen-api-key';
 var CACHE_TTL = 15 * 60 * 1000;
 var DEFAULT_LOCATION = { name: 'Austin, TX', lat: 30.2676, lon: -97.743 };
@@ -42,8 +44,31 @@ function getPollenApiKey() {
   return localStorage.getItem(POLLEN_KEY_STORAGE) || '';
 }
 
+function getStoredLocation() {
+  var rawLat = localStorage.getItem(LAST_LOCATION_LAT_KEY);
+  var rawLon = localStorage.getItem(LAST_LOCATION_LON_KEY);
+  if (rawLat == null || rawLon == null) return null;
+
+  var lat = parseFloat(rawLat);
+  var lon = parseFloat(rawLon);
+  if (Number.isNaN(lat) || Number.isNaN(lon)) return null;
+
+  return {
+    name: window.userLocation && window.userLocation.name ? window.userLocation.name : DEFAULT_LOCATION.name,
+    lat: lat,
+    lon: lon,
+  };
+}
+
+function persistLocation(loc) {
+  localStorage.setItem(LAST_LOCATION_LAT_KEY, String(loc.lat));
+  localStorage.setItem(LAST_LOCATION_LON_KEY, String(loc.lon));
+}
+
 function getLocation() {
   if (window.userLocation) return window.userLocation;
+  var stored = getStoredLocation();
+  if (stored) return stored;
   return DEFAULT_LOCATION;
 }
 
@@ -486,6 +511,7 @@ window.addEventListener('locationUpdated', async function(e) {
   var name = e.detail.name || await reverseGeocode(lat, lon);
   var loc = { name: name, lat: lat, lon: lon };
   window.userLocation = loc;
+  persistLocation(loc);
 
   document.getElementById('city-name').textContent = loc.name;
   if (window.globeSetCity) window.globeSetCity(loc.lat, loc.lon);
@@ -508,6 +534,7 @@ window.addEventListener('locationUpdated', async function(e) {
 // --- Main ---
 (async function init() {
   var loc = getLocation();
+  window.userLocation = loc;
   document.getElementById('city-name').textContent = loc.name;
   initLeafToggle();
 
