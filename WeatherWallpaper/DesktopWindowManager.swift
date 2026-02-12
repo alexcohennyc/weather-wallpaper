@@ -1,12 +1,13 @@
 import Cocoa
 import WebKit
 
-class DesktopWindowManager {
+class DesktopWindowManager: NSObject, WKScriptMessageHandler {
 
     private var windows: [(NSWindow, WKWebView)] = []
     private var pendingToken: String?
     private var pendingLocation: (lat: Double, lon: Double)?
     private var pendingPollenKey: String?
+    private let processPool = WKProcessPool()
 
     func setupWindows() {
         createWindowsForAllScreens()
@@ -34,15 +35,16 @@ class DesktopWindowManager {
     // MARK: - Window creation
 
     private func createWindowsForAllScreens() {
-        for screen in NSScreen.screens {
-            let (window, webView) = createDesktopWindow(for: screen)
+        for (index, screen) in NSScreen.screens.enumerated() {
+            let isPrimary = (index == 0)
+            let (window, webView) = createDesktopWindow(for: screen, isPrimary: isPrimary)
             windows.append((window, webView))
             loadContent(in: webView)
             window.orderFront(nil)
         }
     }
 
-    private func createDesktopWindow(for screen: NSScreen) -> (NSWindow, WKWebView) {
+    private func createDesktopWindow(for screen: NSScreen, isPrimary: Bool) -> (NSWindow, WKWebView) {
         let window = NSWindow(
             contentRect: screen.frame,
             styleMask: .borderless,
@@ -61,7 +63,21 @@ class DesktopWindowManager {
 
         let config = WKWebViewConfiguration()
         config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
+        #if DEBUG
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
+        #endif
+        config.processPool = processPool
+
+        // Register data relay message handler
+        config.userContentController.add(self, name: "dataRelay")
+
+        // Inject primary/secondary flag before page load
+        let primaryScript = WKUserScript(
+            source: "window.isPrimaryView = \(isPrimary);",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        )
+        config.userContentController.addUserScript(primaryScript)
 
         // Inject Mapbox token before page load
         if let token = UserDefaults.standard.string(forKey: "mapbox-access-token"), !token.isEmpty {
@@ -109,14 +125,40 @@ class DesktopWindowManager {
         webView.loadFileURL(indexURL, allowingReadAccessTo: webDir)
     }
 
+    // MARK: - WKScriptMessageHandler (data relay from primary → all)
+
+    func userContentController(_ userContentController: WKUserContentController,
+                               didReceive message: WKScriptMessage) {
+        guard message.name == "dataRelay",
+              let body = message.body as? [String: Any],
+              let type = body["type"] as? String,
+              let jsonStr = body["json"] as? String else { return }
+
+        // Broadcast to all webviews (primary will receive too, but receivers are idempotent)
+        let js: String
+        switch type {
+        case "flights":
+            js = "if (window.receiveFlights) window.receiveFlights(\(jsonStr));"
+        case "weather":
+            js = "if (window.receiveWeather) window.receiveWeather(\(jsonStr));"
+        case "allergy":
+            js = "if (window.receiveAllergy) window.receiveAllergy(\(jsonStr));"
+        case "radarUrl":
+            js = "if (window.receiveRadarUrl) window.receiveRadarUrl(\(jsonStr));"
+        default:
+            return
+        }
+        evaluateOnAll(js)
+    }
+
     // MARK: - JavaScript injection
 
-    func injectLocation(lat: Double, lon: Double) {
+    func injectLocation(lat: Double, lon: Double, name: String = "") {
         pendingLocation = (lat, lon)
         let js = """
-        window.userLocation = { name: '', lat: \(lat), lon: \(lon) };
+        window.userLocation = { name: \(quoteJS(name)), lat: \(lat), lon: \(lon) };
         window.dispatchEvent(new CustomEvent('locationUpdated', {
-            detail: { latitude: \(lat), longitude: \(lon) }
+            detail: { latitude: \(lat), longitude: \(lon), name: \(quoteJS(name)) }
         }));
         """
         evaluateOnAll(js)
@@ -167,6 +209,11 @@ class DesktopWindowManager {
 
     func injectSpinToggle(_ enabled: Bool) {
         let js = "if (window.setSpinEnabled) window.setSpinEnabled(\(enabled));"
+        evaluateOnAll(js)
+    }
+
+    func injectPaused(_ paused: Bool) {
+        let js = "if (window.setAppPaused) window.setAppPaused(\(paused));"
         evaluateOnAll(js)
     }
 

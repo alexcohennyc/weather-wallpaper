@@ -8,6 +8,31 @@ var clockInterval = null;
 var showingAllergy = false;
 var sunriseMinutes = null;
 var sunsetMinutes = null;
+var appPaused = false;
+
+window.setAppPaused = function (paused) {
+  appPaused = paused;
+  if (paused) {
+    if (clockInterval) clearInterval(clockInterval);
+    clockInterval = null;
+  } else {
+    updateClock();
+    if (clockInterval) clearInterval(clockInterval);
+    clockInterval = setInterval(updateClock, 60000);
+    // Refresh weather if resumed and stale
+    var loc = getLocation();
+    var cached = localStorage.getItem(CACHE_KEY);
+    if (cached) {
+      try {
+        var data = JSON.parse(cached);
+        var age = Date.now() - new Date(data.timestamp).getTime();
+        if (age >= CACHE_TTL && window.isPrimaryView) {
+          fetchWeather(loc);
+        }
+      } catch (e) { }
+    }
+  }
+};
 
 function getPollenApiKey() {
   return localStorage.getItem(POLLEN_KEY_STORAGE) || '';
@@ -114,13 +139,13 @@ function buildSunArc(sunrise, sunset) {
     ' stroke="rgba(255,255,255,0.07)" fill="none" stroke-width="1" stroke-dasharray="2 2"/>' +
     '<circle id="sun-glow" cx="' + cx + '" cy="' + (horizonY - ryDay) + '" r="6" fill="' + accent + '" opacity="0.2"/>' +
     '<circle id="sun-dot" cx="' + cx + '" cy="' + (horizonY - ryDay) + '" r="3" fill="' + accent + '"/>' +
-  '</svg>';
+    '</svg>';
 
   return '<div class="sun-arc-wrap">' +
     '<div class="sun-time"><span class="stat-label">Sunrise</span><span class="stat-value">' + riseStr + '</span></div>' +
     svg +
     '<div class="sun-time"><span class="stat-label">Sunset</span><span class="stat-value">' + setStr + '</span></div>' +
-  '</div>';
+    '</div>';
 }
 
 function updateSunDot() {
@@ -175,7 +200,7 @@ function render(data) {
   currentTimezone = data.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
   updateClock();
   if (clockInterval) clearInterval(clockInterval);
-  clockInterval = setInterval(updateClock, 10000);
+  clockInterval = setInterval(updateClock, 60000);
 
   sunriseMinutes = parseSunMinutes(data.sunrise);
   sunsetMinutes = parseSunMinutes(data.sunset);
@@ -185,7 +210,7 @@ function render(data) {
     { label: 'Wind', value: current.windSpeed != null ? Math.round(current.windSpeed) + ' mph' : '--' },
   ];
 
-  var statsHtml = stats.map(function(s) {
+  var statsHtml = stats.map(function (s) {
     return '<div class="stat-item"><span class="stat-label">' + s.label + '</span><span class="stat-value">' + s.value + '</span></div>';
   }).join('');
 
@@ -196,20 +221,21 @@ function render(data) {
   document.getElementById('stats').innerHTML = statsHtml;
   updateSunDot();
 
-  document.getElementById('forecast').innerHTML = daily.map(function(d) {
+  document.getElementById('forecast').innerHTML = daily.map(function (d) {
     var cond = wmoToShort(d.weatherCode);
     return '<div class="forecast-item">' +
       '<span class="forecast-day">' + d.day + '</span>' +
       (cond ? '<span class="forecast-cond">' + cond + '</span>' : '') +
       '<span class="forecast-temps">' +
-        '<span class="forecast-high">' + Math.round(d.high) + '\u00B0</span>' +
-        '<span class="forecast-low">' + Math.round(d.low) + '\u00B0</span>' +
+      '<span class="forecast-high">' + Math.round(d.high) + '\u00B0</span>' +
+      '<span class="forecast-low">' + Math.round(d.low) + '\u00B0</span>' +
       '</span>' +
-    '</div>';
+      '</div>';
   }).join('');
 }
 
 async function fetchWeather(loc) {
+  if (!window.isPrimaryView || appPaused) return;
   var url = 'https://api.open-meteo.com/v1/forecast' +
     '?latitude=' + loc.lat +
     '&longitude=' + loc.lon +
@@ -237,7 +263,7 @@ async function fetchWeather(loc) {
       pressure: data.current.surface_pressure,
       dewpoint: data.current.dew_point_2m,
     },
-    daily: data.daily.time.map(function(date, i) {
+    daily: data.daily.time.map(function (date, i) {
       return {
         day: formatDayFromDate(date),
         high: data.daily.temperature_2m_max[i],
@@ -249,8 +275,22 @@ async function fetchWeather(loc) {
   };
 
   localStorage.setItem(CACHE_KEY, JSON.stringify(result));
+
+  // Relay weather data
+  try {
+    webkit.messageHandlers.dataRelay.postMessage({
+      type: 'weather',
+      json: JSON.stringify(result)
+    });
+  } catch (e) { }
+
   return result;
 }
+
+window.receiveWeather = function (data) {
+  if (window.isPrimaryView) return;
+  render(data);
+};
 
 // --- Air quality / allergens ---
 function aqiLabel(aqi) {
@@ -309,31 +349,31 @@ function renderAllergy(aqData, pollenData) {
       '<span class="stat-label">Air Quality</span>' +
       '<span class="stat-value ' + aqi.cls + '">' + (c.us_aqi != null ? c.us_aqi : '--') + '</span>' +
       '<span class="allergy-sublabel ' + aqi.cls + '">' + aqi.text + '</span>' +
-    '</div>';
+      '</div>';
 
     html += '<div class="allergy-item">' +
       '<span class="stat-label">PM2.5</span>' +
       '<span class="stat-value">' + (c.pm2_5 != null ? Math.round(c.pm2_5) : '--') + '</span>' +
       '<span class="allergy-sublabel">\u00B5g/m\u00B3</span>' +
-    '</div>';
+      '</div>';
 
     html += '<div class="allergy-item">' +
       '<span class="stat-label">PM10</span>' +
       '<span class="stat-value">' + (c.pm10 != null ? Math.round(c.pm10) : '--') + '</span>' +
       '<span class="allergy-sublabel">\u00B5g/m\u00B3</span>' +
-    '</div>';
+      '</div>';
 
     html += '<div class="allergy-item">' +
       '<span class="stat-label">UV Index</span>' +
       '<span class="stat-value">' + (c.uv_index != null ? c.uv_index.toFixed(1) : '--') + '</span>' +
-    '</div>';
+      '</div>';
   }
 
   if (pollenData && pollenData.dailyInfo && pollenData.dailyInfo.length > 0) {
     var day = pollenData.dailyInfo[0];
     html += '<div class="allergy-divider"></div>';
     if (day.plantInfo) {
-      day.plantInfo.forEach(function(plant) {
+      day.plantInfo.forEach(function (plant) {
         if (!plant.inSeason && (!plant.indexInfo || plant.indexInfo.value === 0)) return;
         var cat = googlePollenCategory(plant.indexInfo);
         var val = plant.indexInfo ? plant.indexInfo.value : 0;
@@ -341,7 +381,7 @@ function renderAllergy(aqData, pollenData) {
           '<span class="stat-label">' + plant.displayName + '</span>' +
           '<span class="stat-value ' + cat.cls + '">' + val + '<span class="pollen-scale">/5</span></span>' +
           '<span class="allergy-sublabel ' + cat.cls + '">' + cat.text + '</span>' +
-        '</div>';
+          '</div>';
       });
     }
   } else {
@@ -354,19 +394,33 @@ function renderAllergy(aqData, pollenData) {
 }
 
 async function loadAllergyData() {
+  if (!window.isPrimaryView) return;
   var el = document.getElementById('allergy-content');
   el.innerHTML = '<span class="bar-loading">Loading\u2026</span>';
   var loc = getLocation();
   try {
     var results = await Promise.all([
-      fetchAirQuality(loc).catch(function() { return null; }),
-      fetchGooglePollen(loc).catch(function() { return null; })
+      fetchAirQuality(loc).catch(function () { return null; }),
+      fetchGooglePollen(loc).catch(function () { return null; })
     ]);
     renderAllergy(results[0], results[1]);
+
+    // Relay allergy data
+    try {
+      webkit.messageHandlers.dataRelay.postMessage({
+        type: 'allergy',
+        json: JSON.stringify({ aqData: results[0], pollenData: results[1] })
+      });
+    } catch (e) { }
   } catch (e) {
     el.innerHTML = '<span class="bar-loading">Air quality unavailable</span>';
   }
 }
+
+window.receiveAllergy = function (data) {
+  if (window.isPrimaryView) return;
+  renderAllergy(data.aqData, data.pollenData);
+};
 
 window.reloadAllergy = loadAllergyData;
 
@@ -374,57 +428,21 @@ function initLeafToggle() {
   // Leaf button removed — pollen toggle now controlled from Swift menu bar
 }
 
-// --- Reverse geocode for city name ---
-var STATE_ABBREVS = {
-  'Alabama':'AL','Alaska':'AK','Arizona':'AZ','Arkansas':'AR','California':'CA',
-  'Colorado':'CO','Connecticut':'CT','Delaware':'DE','Florida':'FL','Georgia':'GA',
-  'Hawaii':'HI','Idaho':'ID','Illinois':'IL','Indiana':'IN','Iowa':'IA',
-  'Kansas':'KS','Kentucky':'KY','Louisiana':'LA','Maine':'ME','Maryland':'MD',
-  'Massachusetts':'MA','Michigan':'MI','Minnesota':'MN','Mississippi':'MS','Missouri':'MO',
-  'Montana':'MT','Nebraska':'NE','Nevada':'NV','New Hampshire':'NH','New Jersey':'NJ',
-  'New Mexico':'NM','New York':'NY','North Carolina':'NC','North Dakota':'ND','Ohio':'OH',
-  'Oklahoma':'OK','Oregon':'OR','Pennsylvania':'PA','Rhode Island':'RI','South Carolina':'SC',
-  'South Dakota':'SD','Tennessee':'TN','Texas':'TX','Utah':'UT','Vermont':'VT',
-  'Virginia':'VA','Washington':'WA','West Virginia':'WV','Wisconsin':'WI','Wyoming':'WY',
-  'District of Columbia':'DC'
-};
-
-function stateAbbrev(state) {
-  return STATE_ABBREVS[state] || state;
-}
-
-async function reverseGeocode(lat, lon) {
-  try {
-    var res = await fetch(
-      'https://geocoding-api.open-meteo.com/v1/search?name=' +
-      lat.toFixed(2) + ',' + lon.toFixed(2) +
-      '&count=1&language=en&format=json'
-    );
-    var json = await res.json();
-    if (json.results && json.results.length > 0) {
-      var r = json.results[0];
-      var city = r.name || '';
-      var admin = r.admin1 || '';
-      var country = r.country_code ? r.country_code.toUpperCase() : '';
-      if (country === 'US' && admin) return city + ', ' + stateAbbrev(admin);
-      if (admin && country) return city + ', ' + admin + ', ' + country;
-      if (country) return city + ', ' + country;
-      return city;
-    }
-  } catch (e) {}
-  return lat.toFixed(2) + ', ' + lon.toFixed(2);
-}
-
 // --- Location update from Swift ---
-window.addEventListener('locationUpdated', async function(e) {
+window.addEventListener('locationUpdated', async function (e) {
   var lat = e.detail.latitude;
   var lon = e.detail.longitude;
-  var name = e.detail.name || await reverseGeocode(lat, lon);
+
+  if (window.globeSetCity) window.globeSetCity(lat, lon);
+
+  // Secondary views stop here and wait for dataRelay for the rest
+  if (!window.isPrimaryView) return;
+
+  var name = e.detail.name || (lat.toFixed(2) + ', ' + lon.toFixed(2));
   var loc = { name: name, lat: lat, lon: lon };
   window.userLocation = loc;
 
   document.getElementById('city-name').textContent = loc.name;
-  if (window.globeSetCity) window.globeSetCity(loc.lat, loc.lon);
 
   document.getElementById('allergy-content').innerHTML =
     '<span class="bar-loading">Loading\u2026</span>';
@@ -464,8 +482,10 @@ window.addEventListener('locationUpdated', async function(e) {
   }
 
   try {
-    var data = await fetchWeather(loc);
-    render(data);
+    if (window.isPrimaryView) {
+      var data = await fetchWeather(loc);
+      render(data);
+    }
   } catch (err) {
     console.error('Weather fetch failed:', err);
     if (!cached) document.getElementById('condition').textContent = 'Unable to load weather';
