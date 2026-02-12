@@ -2,12 +2,12 @@
   'use strict';
 
   var PALETTES = [
-    { name: 'gold',   accent: '#C9A84C', accentRgb: 'rgb(201,168,76)'  },
-    { name: 'arctic', accent: '#4D8CC9', accentRgb: 'rgb(77,140,201)'  },
-    { name: 'aurora', accent: '#4DC98A', accentRgb: 'rgb(77,201,138)'  },
-    { name: 'rose',   accent: '#C94D6E', accentRgb: 'rgb(201,77,110)'  },
-    { name: 'violet', accent: '#8A4DC9', accentRgb: 'rgb(138,77,201)'  },
-    { name: 'ember',  accent: '#C96B4D', accentRgb: 'rgb(201,107,77)'  },
+    { name: 'gold', accent: '#C9A84C', accentRgb: 'rgb(201,168,76)' },
+    { name: 'arctic', accent: '#4D8CC9', accentRgb: 'rgb(77,140,201)' },
+    { name: 'aurora', accent: '#4DC98A', accentRgb: 'rgb(77,201,138)' },
+    { name: 'rose', accent: '#C94D6E', accentRgb: 'rgb(201,77,110)' },
+    { name: 'violet', accent: '#8A4DC9', accentRgb: 'rgb(138,77,201)' },
+    { name: 'ember', accent: '#C96B4D', accentRgb: 'rgb(201,107,77)' },
   ];
   var palette = PALETTES[Math.floor(Math.random() * PALETTES.length)];
   document.documentElement.style.setProperty('--accent', palette.accent);
@@ -21,7 +21,7 @@
   if (!token) {
     mapContainer.innerHTML =
       '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.3);font-family:Inter,sans-serif;font-size:13px;">' +
-        'Waiting for Mapbox token\u2026' +
+      'Waiting for Mapbox token\u2026' +
       '</div>';
     return;
   }
@@ -117,7 +117,7 @@
     };
 
     // Listen for location updates from Swift
-    window.addEventListener('locationUpdated', function(e) {
+    window.addEventListener('locationUpdated', function (e) {
       globeSetCity(e.detail.latitude, e.detail.longitude);
     });
 
@@ -154,7 +154,7 @@
       if (!mapLoaded) return;
       var vis = on ? 'visible' : 'none';
       for (var i = 0; i < labelLayerIds.length; i++) {
-        try { map.setLayoutProperty(labelLayerIds[i], 'visibility', vis); } catch (e) {}
+        try { map.setLayoutProperty(labelLayerIds[i], 'visibility', vis); } catch (e) { }
       }
     };
 
@@ -162,6 +162,8 @@
     var spinAnimId = null;
     var spinSpeed = 360 / 40; // degrees per second (~40s full rotation)
     var lastSpinTime = 0;
+    var lastSpinRender = 0;
+    var SPIN_RENDER_MS = 33; // ~30fps for globe spin
     window.setSpinEnabled = function (on) {
       spinning = on;
       if (on) {
@@ -171,14 +173,56 @@
         if (spinAnimId) { cancelAnimationFrame(spinAnimId); spinAnimId = null; }
       }
     };
+    var appPaused = false;
+    window.setAppPaused = function (paused) {
+      appPaused = paused;
+      if (paused) {
+        // Stop animations
+        if (spinAnimId) { cancelAnimationFrame(spinAnimId); spinAnimId = null; }
+        if (flightAnimInterval) { clearInterval(flightAnimInterval); flightAnimInterval = null; }
+        // Stop fetching
+        if (bgTasksInterval) { clearInterval(bgTasksInterval); bgTasksInterval = null; }
+      } else {
+        // Resume animations if they were enabled
+        if (spinning && !spinAnimId) { lastSpinTime = performance.now(); spinAnimId = requestAnimationFrame(spinStep); }
+        if (flightsEnabled && !flightAnimInterval) { startFlightAnimation(); }
+        // Resume fetching
+        if (flightsEnabled || mapLoaded) {
+          startBackgroundTasks();
+        }
+      }
+    };
+
+    function startBackgroundTasks() {
+      if (bgTasksInterval) clearInterval(bgTasksInterval);
+      runBackgroundTasks();
+      bgTasksInterval = setInterval(runBackgroundTasks, 300000); // 5 minutes
+    }
+
+    function runBackgroundTasks() {
+      if (appPaused) return;
+      if (flightsEnabled) fetchFlights();
+
+      // Update night overlays
+      var tw = map.getSource('twilight-overlay');
+      var nt = map.getSource('night-overlay');
+      if (tw) tw.setData(buildNightPolygon(0));
+      if (nt) nt.setData(buildNightPolygon(6));
+    }
+
     function spinStep(ts) {
       if (!spinning) { spinAnimId = null; return; }
       var dt = (ts - lastSpinTime) / 1000;
       lastSpinTime = ts;
-      var center = map.getCenter();
-      center.lng += spinSpeed * dt;
-      if (center.lng > 180) center.lng -= 360;
-      map.setCenter(center);
+
+      // Throttle map updates to ~30fps
+      if (ts - lastSpinRender >= SPIN_RENDER_MS) {
+        lastSpinRender = ts;
+        var center = map.getCenter();
+        center.lng += spinSpeed * dt;
+        if (center.lng > 180) center.lng -= 360;
+        map.setCenter(center);
+      }
       spinAnimId = requestAnimationFrame(spinStep);
     }
 
@@ -187,25 +231,25 @@
       if (mapLoaded) {
         map.setLayoutProperty('flights-layer', 'visibility', on ? 'visible' : 'none');
         if (on) {
-          fetchFlights();
-          if (!flightInterval) flightInterval = setInterval(fetchFlights, 300000);
+          startBackgroundTasks();
           startFlightAnimation();
         } else {
-          if (flightInterval) { clearInterval(flightInterval); flightInterval = null; }
-          if (flightAnimId) { cancelAnimationFrame(flightAnimId); flightAnimId = null; }
+          if (flightAnimInterval) { clearInterval(flightAnimInterval); flightAnimInterval = null; }
+          flightStore = [];
+          renderFlightPositions();
+          // We keep bgTasksInterval running for night overlays even if flights are off
         }
       }
     };
 
     // --- Flight state ---
-    var FLIGHTS_MAX = 12000;
-    var flightsEnabled = false;
-    var flightInterval = null;
+    var bgTasksInterval = null;
+    var flightAnimInterval = null;
     var flightStore = [];
     var lastFlightFetch = 0;
-    var flightAnimId = null;
-    var lastFlightRender = 0;
-    var FLIGHT_RENDER_MS = 200;
+    var FLIGHTS_MAX = 4000;
+    var flightsEnabled = false;
+    var FLIGHT_RENDER_MS = 500; // 2fps for plane movement (more than enough for globe scale)
 
     // ==================== MAP LOAD ====================
     map.on('load', function () {
@@ -214,12 +258,14 @@
 
       // --- Night overlays ---
       map.addSource('twilight-overlay', { type: 'geojson', data: buildNightPolygon(0) });
-      map.addLayer({ id: 'twilight-overlay-layer', type: 'fill', source: 'twilight-overlay',
+      map.addLayer({
+        id: 'twilight-overlay-layer', type: 'fill', source: 'twilight-overlay',
         paint: { 'fill-color': '#000010', 'fill-opacity': 0.3 }
       });
 
       map.addSource('night-overlay', { type: 'geojson', data: buildNightPolygon(6) });
-      map.addLayer({ id: 'night-overlay-layer', type: 'fill', source: 'night-overlay',
+      map.addLayer({
+        id: 'night-overlay-layer', type: 'fill', source: 'night-overlay',
         paint: { 'fill-color': '#000008', 'fill-opacity': 0.5 }
       });
 
@@ -328,13 +374,8 @@
 
       // Radar starts disabled; controlled via window.setWeatherEnabled()
 
-      // Update terminator every 60s
-      setInterval(function () {
-        var tw = map.getSource('twilight-overlay');
-        var nt = map.getSource('night-overlay');
-        if (tw) tw.setData(buildNightPolygon(0));
-        if (nt) nt.setData(buildNightPolygon(6));
-      }, 60000);
+      // Start background tasks (flights, terminator)
+      startBackgroundTasks();
 
       // --- Flights ---
       map.addSource('flights', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
@@ -373,10 +414,17 @@
       map.setLayoutProperty('flights-layer', 'visibility', 'none');
     });
 
-    // --- Flight fetching ---
+    // --- Flight fetching (primary view only) ---
     function fetchFlights() {
-      if (!mapLoaded) return;
-      fetch('https://opensky-network.org/api/states/all')
+      if (!mapLoaded || appPaused) return;
+      if (!window.isPrimaryView) return;
+      var bounds = map.getBounds();
+      var url = 'https://opensky-network.org/api/states/all' +
+        '?lamin=' + bounds.getSouth().toFixed(2) +
+        '&lomin=' + bounds.getWest().toFixed(2) +
+        '&lamax=' + bounds.getNorth().toFixed(2) +
+        '&lomax=' + bounds.getEast().toFixed(2);
+      fetch(url)
         .then(function (res) {
           if (res.status === 429) { console.warn('[Flights] Rate limited, backing off'); return null; }
           if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -400,9 +448,24 @@
           flightStore = newStore;
           lastFlightFetch = Date.now();
           renderFlightPositions();
+          // Relay flight data to other views via Swift
+          try {
+            webkit.messageHandlers.dataRelay.postMessage({
+              type: 'flights',
+              json: JSON.stringify({ store: newStore, timestamp: lastFlightFetch })
+            });
+          } catch (e) { }
         })
         .catch(function (err) { console.warn('[Flights]', err.message || err); });
     }
+
+    // Receiver for flight data relayed from primary view
+    window.receiveFlights = function (data) {
+      if (window.isPrimaryView) return; // primary already has this data
+      flightStore = data.store || [];
+      lastFlightFetch = data.timestamp || Date.now();
+      renderFlightPositions();
+    };
 
     function renderFlightPositions() {
       if (!flightStore.length) return;
@@ -429,37 +492,56 @@
       if (src) src.setData({ type: 'FeatureCollection', features: features });
     }
 
-    function animateFlights(ts) {
-      if (!flightsEnabled) { flightAnimId = null; return; }
-      if (ts - lastFlightRender >= FLIGHT_RENDER_MS) { lastFlightRender = ts; renderFlightPositions(); }
-      flightAnimId = requestAnimationFrame(animateFlights);
+    function startFlightAnimation() {
+      if (!flightAnimInterval) {
+        flightAnimInterval = setInterval(renderFlightPositions, FLIGHT_RENDER_MS);
+      }
     }
-    function startFlightAnimation() { if (!flightAnimId) { lastFlightRender = 0; flightAnimId = requestAnimationFrame(animateFlights); } }
 
-    // --- Weather radar (RainViewer) ---
+    // --- Weather radar (RainViewer, primary view only) ---
     var weatherEnabled = false;
     function fetchRadar() {
-      if (!mapLoaded) return;
+      if (!mapLoaded || appPaused) return;
+      if (!window.isPrimaryView) return;
       fetch('https://api.rainviewer.com/public/weather-maps.json')
         .then(function (res) { return res.json(); })
         .then(function (data) {
           if (!data || !data.radar || !data.radar.past || !data.radar.past.length) return;
           var latest = data.radar.past[data.radar.past.length - 1];
           var tileUrl = 'https://tilecache.rainviewer.com' + latest.path + '/256/{z}/{x}/{y}/2/1_1.png';
-          var src = map.getSource('radar');
-          if (src) {
-            var vis = weatherEnabled ? 'visible' : 'none';
-            map.removeLayer('radar-layer');
-            map.removeSource('radar');
-            map.addSource('radar', { type: 'raster', tiles: [tileUrl], tileSize: 256 });
-            map.addLayer({
-              id: 'radar-layer', type: 'raster', source: 'radar',
-              paint: { 'raster-opacity': 0.5 },
-              layout: { 'visibility': vis }
+          applyRadarUrl(tileUrl);
+          // Relay radar URL to other views via Swift
+          try {
+            webkit.messageHandlers.dataRelay.postMessage({
+              type: 'radarUrl',
+              json: JSON.stringify(tileUrl)
             });
-          }
+          } catch (e) { }
         })
         .catch(function (err) { console.warn('[Radar]', err.message || err); });
     }
+
+    function applyRadarUrl(tileUrl) {
+      var src = map.getSource('radar');
+      if (src) {
+        src.setTiles([tileUrl]);
+        // Visibility is already handled by window.setWeatherEnabled and the layer remains in place
+      } else {
+        // Fallback for initial load if source wasn't added in 'load' for some reason
+        var vis = weatherEnabled ? 'visible' : 'none';
+        map.addSource('radar', { type: 'raster', tiles: [tileUrl], tileSize: 256 });
+        map.addLayer({
+          id: 'radar-layer', type: 'raster', source: 'radar',
+          paint: { 'raster-opacity': 0.5 },
+          layout: { 'visibility': vis }
+        });
+      }
+    }
+
+    // Receiver for radar URL relayed from primary view
+    window.receiveRadarUrl = function (tileUrl) {
+      if (window.isPrimaryView) return;
+      if (mapLoaded) applyRadarUrl(tileUrl);
+    };
   }
 })();

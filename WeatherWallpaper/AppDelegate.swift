@@ -14,6 +14,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var labelsEnabled: Bool = true
     private var spinEnabled: Bool = false
     private var currentUnitSystem: String = "imperial"
+    private let geocoder = CLGeocoder()
+    private var geocodeCache: [String: String] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let savedUnit = UserDefaults.standard.string(forKey: "unit-system"), ["imperial", "metric"].contains(savedUnit) {
@@ -27,7 +29,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         desktopManager.injectUnitSystem(currentUnitSystem)
 
         locationManager = LocationManager { [weak self] lat, lon in
-            self?.desktopManager.injectLocation(lat: lat, lon: lon)
+            self?.reverseGeocodeAndInject(lat: lat, lon: lon)
         }
         locationManager.requestLocation()
 
@@ -41,6 +43,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
         )
+
+        setupPowerObservers()
     }
 
     // MARK: - Menu Bar
@@ -145,9 +149,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         err.runModal()
                         return
                     }
+                    let name: String
+                    if let city = place.locality, let state = place.administrativeArea {
+                        name = "\(city), \(state)"
+                    } else {
+                        name = place.name ?? ""
+                    }
                     self?.desktopManager.injectLocation(
                         lat: loc.coordinate.latitude,
-                        lon: loc.coordinate.longitude
+                        lon: loc.coordinate.longitude,
+                        name: name
                     )
                 }
             }
@@ -313,6 +324,56 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func screensChanged() {
         desktopManager.rebuildWindows()
+    }
+
+    // MARK: - Power & Sleep
+
+    private func setupPowerObservers() {
+        let ws = NSWorkspace.shared
+        ws.notificationCenter.addObserver(self, selector: #selector(systemWillSleep), name: NSWorkspace.willSleepNotification, object: nil)
+        ws.notificationCenter.addObserver(self, selector: #selector(systemDidWake), name: NSWorkspace.didWakeNotification, object: nil)
+        ws.notificationCenter.addObserver(self, selector: #selector(systemWillSleep), name: NSWorkspace.screensDidSleepNotification, object: nil)
+        ws.notificationCenter.addObserver(self, selector: #selector(systemDidWake), name: NSWorkspace.screensDidWakeNotification, object: nil)
+
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(systemWillSleep), name: NSNotification.Name("com.apple.screenIsLocked"), object: nil)
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(systemDidWake), name: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil)
+    }
+
+    @objc private func systemWillSleep() {
+        desktopManager.injectPaused(true)
+    }
+
+    @objc private func systemDidWake() {
+        desktopManager.injectPaused(false)
+    }
+
+    private func reverseGeocodeAndInject(lat: Double, lon: Double) {
+        let cacheKey = String(format: "%.2f,%.2f", lat, lon)
+        if let cachedName = geocodeCache[cacheKey] {
+            desktopManager.injectLocation(lat: lat, lon: lon, name: cachedName)
+            return
+        }
+
+        let location = CLLocation(latitude: lat, longitude: lon)
+        geocoder.reverseGeocodeLocation(location) { [weak self] placemarks, error in
+            let name: String
+            if let p = placemarks?.first {
+                let city = p.locality ?? p.name ?? ""
+                let state = p.administrativeArea ?? ""
+                if !city.isEmpty && !state.isEmpty {
+                    name = "\(city), \(state)"
+                } else {
+                    name = city.isEmpty ? state : city
+                }
+            } else {
+                name = String(format: "%.2f, %.2f", lat, lon)
+            }
+            
+            DispatchQueue.main.async {
+                self?.geocodeCache[cacheKey] = name
+                self?.desktopManager.injectLocation(lat: lat, lon: lon, name: name)
+            }
+        }
     }
 }
 
