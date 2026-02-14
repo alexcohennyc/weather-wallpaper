@@ -27,7 +27,7 @@ $(APP_BUNDLE): $(SWIFT_FILES) WeatherWallpaper/Web/* WeatherWallpaper/Info.plist
 	     -e 's/$$(PRODUCT_NAME)/Weather Wallpaper/g' \
 	     -e 's/$$(MACOSX_DEPLOYMENT_TARGET)/13.0/g' \
 	     WeatherWallpaper/Info.plist > $(CONTENTS)/Info.plist
-	@cp WeatherWallpaper/Web/* $(RESOURCES)/Web/
+	@cp -R WeatherWallpaper/Web/* $(RESOURCES)/Web/
 	@echo "Built: $(APP_BUNDLE)"
 
 run: $(APP_BUNDLE)

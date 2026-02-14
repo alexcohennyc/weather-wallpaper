@@ -293,7 +293,7 @@ function render(data) {
 }
 
 async function fetchWeather(loc) {
-  if (!window.isPrimaryView || appPaused) return;
+  if (window.isPrimaryView === false || appPaused) return;
 
   var unitSystem = getUnitSystem();
   var temperatureUnit = unitSystem === 'metric' ? 'celsius' : 'fahrenheit';
@@ -513,7 +513,7 @@ window.addEventListener('locationUpdated', async function (e) {
   if (window.globeSetCity) window.globeSetCity(lat, lon);
 
   // Secondary views stop here and wait for dataRelay for the rest
-  if (!window.isPrimaryView) return;
+  if (window.isPrimaryView === false) return;
 
   var name = e.detail.name || (lat.toFixed(2) + ', ' + lon.toFixed(2));
   var loc = { name: name, lat: lat, lon: lon };
@@ -527,7 +527,7 @@ window.addEventListener('locationUpdated', async function (e) {
 
   try {
     var data = await fetchWeather(loc);
-    render(data);
+    if (data) render(data);
   } catch (e) {
     console.error('Weather fetch failed:', e);
   }
@@ -562,10 +562,8 @@ window.addEventListener('locationUpdated', async function (e) {
   }
 
   try {
-    if (window.isPrimaryView) {
-      var data = await fetchWeather(loc);
-      render(data);
-    }
+    var data = await fetchWeather(loc);
+    if (data) render(data);
   } catch (err) {
     console.error('Weather fetch failed:', err);
     if (!cached) document.getElementById('condition').textContent = 'Unable to load weather';
@@ -576,7 +574,7 @@ window.addEventListener('locationUpdated', async function (e) {
     var loc = getLocation();
     try {
       var data = await fetchWeather(loc);
-      render(data);
+      if (data) render(data);
     } catch (e) {
       console.warn('Weather auto-refresh failed:', e);
     }
