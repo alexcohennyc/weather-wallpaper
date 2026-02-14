@@ -570,4 +570,15 @@ window.addEventListener('locationUpdated', async function (e) {
     console.error('Weather fetch failed:', err);
     if (!cached) document.getElementById('condition').textContent = 'Unable to load weather';
   }
+
+  // Auto-refresh weather every 15 minutes
+  setInterval(async function () {
+    var loc = getLocation();
+    try {
+      var data = await fetchWeather(loc);
+      render(data);
+    } catch (e) {
+      console.warn('Weather auto-refresh failed:', e);
+    }
+  }, CACHE_TTL);
 })();
