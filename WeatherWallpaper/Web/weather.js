@@ -1,5 +1,8 @@
 // --- Shared location ---
-var CACHE_KEY = 'weather-cache';
+var CACHE_KEY_PREFIX = 'weather-cache';
+var UNIT_SYSTEM_KEY = 'unit-system';
+var LAST_LOCATION_LAT_KEY = 'last-location-lat';
+var LAST_LOCATION_LON_KEY = 'last-location-lon';
 var POLLEN_KEY_STORAGE = 'google-pollen-api-key';
 var CACHE_TTL = 15 * 60 * 1000;
 var DEFAULT_LOCATION = { name: 'Austin, TX', lat: 30.2676, lon: -97.743 };
@@ -9,12 +12,63 @@ var showingAllergy = false;
 var sunriseMinutes = null;
 var sunsetMinutes = null;
 
+function normalizeUnitSystem(unitSystem) {
+  return unitSystem === 'metric' ? 'metric' : 'imperial';
+}
+
+function detectDefaultUnitSystem() {
+  try {
+    var locale = Intl.DateTimeFormat().resolvedOptions().locale || '';
+    var region = locale.split('-').pop().toUpperCase();
+    if (region === 'US' || region === 'LR' || region === 'MM') return 'imperial';
+  } catch (e) {}
+  return 'metric';
+}
+
+function getUnitSystem() {
+  var stored = localStorage.getItem(UNIT_SYSTEM_KEY);
+  return normalizeUnitSystem(stored || detectDefaultUnitSystem());
+}
+
+function setStoredUnitSystem(unitSystem) {
+  var normalized = normalizeUnitSystem(unitSystem);
+  localStorage.setItem(UNIT_SYSTEM_KEY, normalized);
+  return normalized;
+}
+
+function getCacheKey() {
+  return CACHE_KEY_PREFIX + '-' + getUnitSystem();
+}
+
 function getPollenApiKey() {
   return localStorage.getItem(POLLEN_KEY_STORAGE) || '';
 }
 
+function getStoredLocation() {
+  var rawLat = localStorage.getItem(LAST_LOCATION_LAT_KEY);
+  var rawLon = localStorage.getItem(LAST_LOCATION_LON_KEY);
+  if (rawLat == null || rawLon == null) return null;
+
+  var lat = parseFloat(rawLat);
+  var lon = parseFloat(rawLon);
+  if (Number.isNaN(lat) || Number.isNaN(lon)) return null;
+
+  return {
+    name: window.userLocation && window.userLocation.name ? window.userLocation.name : DEFAULT_LOCATION.name,
+    lat: lat,
+    lon: lon,
+  };
+}
+
+function persistLocation(loc) {
+  localStorage.setItem(LAST_LOCATION_LAT_KEY, String(loc.lat));
+  localStorage.setItem(LAST_LOCATION_LON_KEY, String(loc.lon));
+}
+
 function getLocation() {
   if (window.userLocation) return window.userLocation;
+  var stored = getStoredLocation();
+  if (stored) return stored;
   return DEFAULT_LOCATION;
 }
 
@@ -168,8 +222,12 @@ function render(data) {
 
   document.getElementById('city-name').textContent = location.name;
 
+  var unitSystem = normalizeUnitSystem(data.unitSystem || getUnitSystem());
+  var tempUnit = unitSystem === 'metric' ? '°C' : '°F';
+  var windUnit = unitSystem === 'metric' ? 'km/h' : 'mph';
+
   var temp = current.temperature != null ? Math.round(current.temperature) : '--';
-  document.getElementById('temperature').innerHTML = temp + '<span class="unit">\u00B0</span>';
+  document.getElementById('temperature').innerHTML = temp + '<span class="unit">' + tempUnit + '</span>';
   document.getElementById('condition').textContent = wmoToCondition(current.weatherCode);
 
   currentTimezone = data.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -182,7 +240,7 @@ function render(data) {
 
   var stats = [
     { label: 'Humidity', value: current.humidity != null ? Math.round(current.humidity) + '%' : '--' },
-    { label: 'Wind', value: current.windSpeed != null ? Math.round(current.windSpeed) + ' mph' : '--' },
+    { label: 'Wind', value: current.windSpeed != null ? Math.round(current.windSpeed) + ' ' + windUnit : '--' },
   ];
 
   var statsHtml = stats.map(function(s) {
@@ -210,13 +268,17 @@ function render(data) {
 }
 
 async function fetchWeather(loc) {
+  var unitSystem = getUnitSystem();
+  var temperatureUnit = unitSystem === 'metric' ? 'celsius' : 'fahrenheit';
+  var windSpeedUnit = unitSystem === 'metric' ? 'kmh' : 'mph';
+
   var url = 'https://api.open-meteo.com/v1/forecast' +
     '?latitude=' + loc.lat +
     '&longitude=' + loc.lon +
     '&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,surface_pressure,dew_point_2m' +
     '&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset' +
-    '&temperature_unit=fahrenheit' +
-    '&wind_speed_unit=mph' +
+    '&temperature_unit=' + temperatureUnit +
+    '&wind_speed_unit=' + windSpeedUnit +
     '&timezone=auto' +
     '&forecast_days=7';
 
@@ -225,6 +287,7 @@ async function fetchWeather(loc) {
 
   var result = {
     location: loc,
+    unitSystem: unitSystem,
     timezone: data.timezone,
     sunrise: data.daily.sunrise ? data.daily.sunrise[0] : null,
     sunset: data.daily.sunset ? data.daily.sunset[0] : null,
@@ -248,7 +311,7 @@ async function fetchWeather(loc) {
     timestamp: new Date().toISOString(),
   };
 
-  localStorage.setItem(CACHE_KEY, JSON.stringify(result));
+  localStorage.setItem(getCacheKey(), JSON.stringify(result));
   return result;
 }
 
@@ -370,6 +433,19 @@ async function loadAllergyData() {
 
 window.reloadAllergy = loadAllergyData;
 
+window.setUnitSystem = function(unitSystem) {
+  var normalized = setStoredUnitSystem(unitSystem);
+  var loc = getLocation();
+
+  fetchWeather(loc)
+    .then(render)
+    .catch(function(err) {
+      console.error('Weather fetch failed:', err);
+    });
+
+  return normalized;
+};
+
 function initLeafToggle() {
   // Leaf button removed — pollen toggle now controlled from Swift menu bar
 }
@@ -422,6 +498,7 @@ window.addEventListener('locationUpdated', async function(e) {
   var name = e.detail.name || await reverseGeocode(lat, lon);
   var loc = { name: name, lat: lat, lon: lon };
   window.userLocation = loc;
+  persistLocation(loc);
 
   document.getElementById('city-name').textContent = loc.name;
   if (window.globeSetCity) window.globeSetCity(loc.lat, loc.lon);
@@ -444,12 +521,14 @@ window.addEventListener('locationUpdated', async function(e) {
 // --- Main ---
 (async function init() {
   var loc = getLocation();
+  window.userLocation = loc;
   document.getElementById('city-name').textContent = loc.name;
   initLeafToggle();
 
   if (window.globeSetCity) window.globeSetCity(loc.lat, loc.lon);
 
-  var cached = localStorage.getItem(CACHE_KEY);
+  var cacheKey = getCacheKey();
+  var cached = localStorage.getItem(cacheKey);
   if (cached) {
     try {
       var data = JSON.parse(cached);
@@ -459,7 +538,7 @@ window.addEventListener('locationUpdated', async function(e) {
         if (age < CACHE_TTL) return;
       }
     } catch (e) {
-      localStorage.removeItem(CACHE_KEY);
+      localStorage.removeItem(cacheKey);
     }
   }
 

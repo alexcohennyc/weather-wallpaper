@@ -13,12 +13,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var weatherEnabled: Bool = false
     private var labelsEnabled: Bool = true
     private var spinEnabled: Bool = false
+    private var currentUnitSystem: String = "imperial"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if let savedUnit = UserDefaults.standard.string(forKey: "unit-system"), ["imperial", "metric"].contains(savedUnit) {
+            currentUnitSystem = savedUnit
+        }
+
         setupMenuBar()
 
         desktopManager = DesktopWindowManager()
         desktopManager.setupWindows()
+        desktopManager.injectUnitSystem(currentUnitSystem)
 
         locationManager = LocationManager { [weak self] lat, lon in
             self?.desktopManager.injectLocation(lat: lat, lon: lon)
@@ -65,6 +71,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(zoomCity)
         let zoomStreet = NSMenuItem(title: "Zoom: Street", action: #selector(setZoomStreet(_:)), keyEquivalent: "")
         menu.addItem(zoomStreet)
+        menu.addItem(NSMenuItem.separator())
+
+        let unitsImperial = NSMenuItem(title: "Units: Imperial (°F, mph)", action: #selector(setUnitsImperial(_:)), keyEquivalent: "")
+        unitsImperial.state = currentUnitSystem == "imperial" ? .on : .off
+        menu.addItem(unitsImperial)
+        let unitsMetric = NSMenuItem(title: "Units: Metric (°C, km/h)", action: #selector(setUnitsMetric(_:)), keyEquivalent: "")
+        unitsMetric.state = currentUnitSystem == "metric" ? .on : .off
+        menu.addItem(unitsMetric)
         menu.addItem(NSMenuItem.separator())
 
         let flightsItem = NSMenuItem(title: "Show Flights", action: #selector(toggleFlights(_:)), keyEquivalent: "")
@@ -227,6 +241,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         currentZoom = 12.0
         desktopManager.injectZoom(currentZoom)
         updateZoomCheckmarks()
+    }
+
+    private func updateUnitCheckmarks() {
+        guard let menu = statusItem.menu else { return }
+        for item in menu.items {
+            if item.title.hasPrefix("Units: ") {
+                switch item.title {
+                case "Units: Imperial (°F, mph)": item.state = currentUnitSystem == "imperial" ? .on : .off
+                case "Units: Metric (°C, km/h)": item.state = currentUnitSystem == "metric" ? .on : .off
+                default: break
+                }
+            }
+        }
+    }
+
+    @objc private func setUnitsImperial(_ sender: NSMenuItem) {
+        currentUnitSystem = "imperial"
+        UserDefaults.standard.set(currentUnitSystem, forKey: "unit-system")
+        desktopManager.injectUnitSystem(currentUnitSystem)
+        updateUnitCheckmarks()
+    }
+
+    @objc private func setUnitsMetric(_ sender: NSMenuItem) {
+        currentUnitSystem = "metric"
+        UserDefaults.standard.set(currentUnitSystem, forKey: "unit-system")
+        desktopManager.injectUnitSystem(currentUnitSystem)
+        updateUnitCheckmarks()
     }
 
     // MARK: - Flights

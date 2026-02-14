@@ -3,10 +3,14 @@ import WebKit
 
 class DesktopWindowManager {
 
+    private let lastLocationLatKey = "last-location-lat"
+    private let lastLocationLonKey = "last-location-lon"
+
     private var windows: [(NSWindow, WKWebView)] = []
     private var pendingToken: String?
     private var pendingLocation: (lat: Double, lon: Double)?
     private var pendingPollenKey: String?
+    private var pendingUnitSystem: String?
 
     func setupWindows() {
         createWindowsForAllScreens()
@@ -26,9 +30,20 @@ class DesktopWindowManager {
         if let key = UserDefaults.standard.string(forKey: "google-pollen-api-key"), !key.isEmpty {
             injectPollenApiKey(key)
         }
-        if let loc = pendingLocation {
+        if let unit = pendingUnitSystem ?? UserDefaults.standard.string(forKey: "unit-system") {
+            injectUnitSystem(unit)
+        }
+        if let loc = pendingLocation ?? persistedLocation() {
             injectLocation(lat: loc.lat, lon: loc.lon)
         }
+    }
+
+    private func persistedLocation() -> (lat: Double, lon: Double)? {
+        guard let latNum = UserDefaults.standard.object(forKey: lastLocationLatKey) as? NSNumber,
+              let lonNum = UserDefaults.standard.object(forKey: lastLocationLonKey) as? NSNumber else {
+            return nil
+        }
+        return (latNum.doubleValue, lonNum.doubleValue)
     }
 
     // MARK: - Window creation
@@ -83,10 +98,20 @@ class DesktopWindowManager {
             config.userContentController.addUserScript(script)
         }
 
-        // Inject saved location before page load
-        if let loc = pendingLocation {
+        // Inject preferred unit system before page load
+        if let unit = pendingUnitSystem ?? UserDefaults.standard.string(forKey: "unit-system"), ["imperial", "metric"].contains(unit) {
             let script = WKUserScript(
-                source: "window.userLocation = { name: '', lat: \(loc.lat), lon: \(loc.lon) };",
+                source: "localStorage.setItem('unit-system', \(quoteJS(unit)));",
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            )
+            config.userContentController.addUserScript(script)
+        }
+
+        // Inject saved location before page load
+        if let loc = pendingLocation ?? persistedLocation() {
+            let script = WKUserScript(
+                source: "window.userLocation = { name: '', lat: \(loc.lat), lon: \(loc.lon) }; localStorage.setItem('last-location-lat', '\(loc.lat)'); localStorage.setItem('last-location-lon', '\(loc.lon)');",
                 injectionTime: .atDocumentStart,
                 forMainFrameOnly: true
             )
@@ -113,7 +138,12 @@ class DesktopWindowManager {
 
     func injectLocation(lat: Double, lon: Double) {
         pendingLocation = (lat, lon)
+        UserDefaults.standard.set(lat, forKey: lastLocationLatKey)
+        UserDefaults.standard.set(lon, forKey: lastLocationLonKey)
+
         let js = """
+        localStorage.setItem('last-location-lat', '\(lat)');
+        localStorage.setItem('last-location-lon', '\(lon)');
         window.userLocation = { name: '', lat: \(lat), lon: \(lon) };
         window.dispatchEvent(new CustomEvent('locationUpdated', {
             detail: { latitude: \(lat), longitude: \(lon) }
@@ -136,6 +166,16 @@ class DesktopWindowManager {
         let js = """
         localStorage.setItem('google-pollen-api-key', \(quoteJS(key)));
         if (window.reloadAllergy) window.reloadAllergy();
+        """
+        evaluateOnAll(js)
+    }
+
+    func injectUnitSystem(_ system: String) {
+        let normalized = system == "metric" ? "metric" : "imperial"
+        pendingUnitSystem = normalized
+        let js = """
+        localStorage.setItem('unit-system', \(quoteJS(normalized)));
+        if (window.setUnitSystem) window.setUnitSystem(\(quoteJS(normalized)));
         """
         evaluateOnAll(js)
     }

@@ -71,8 +71,12 @@
     mapboxgl.workerUrl = 'mapbox-gl-csp-worker.js';
     mapboxgl.accessToken = accessToken;
 
-    var startLat = window.userLocation ? window.userLocation.lat : 30.27;
-    var startLon = window.userLocation ? window.userLocation.lon : -97.74;
+    var storedLat = parseFloat(localStorage.getItem('last-location-lat'));
+    var storedLon = parseFloat(localStorage.getItem('last-location-lon'));
+    var hasStoredLocation = !Number.isNaN(storedLat) && !Number.isNaN(storedLon);
+
+    var startLat = window.userLocation ? window.userLocation.lat : (hasStoredLocation ? storedLat : 30.27);
+    var startLon = window.userLocation ? window.userLocation.lon : (hasStoredLocation ? storedLon : -97.74);
 
     var map = new mapboxgl.Map({
       container: 'globe-map',
